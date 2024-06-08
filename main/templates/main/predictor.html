@@ -1,0 +1,28 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Spam Email Predictor</title>
+    <link rel="stylesheet" type="text/css" href="{% static 'css/styles.css' %}">
+</head>
+<body>
+    <h1>Spam Email Predictor</h1>
+    <form id="trainForm" method="post" action="{% url 'train_view' %}" enctype="multipart/form-data">
+        {% csrf_token %}
+        <label for="file">Training File:</label><br>
+        <input type="file" id="file" name="file"><br>
+        <input type="submit" value="Train">
+    </form>
+    <form id="predictForm" method="post" action="{% url 'predict_view' %}">
+        {% csrf_token %}
+        <label for="email_text">Email Text:</label><br>
+        <textarea id="email_text" name="email_text" rows="4" cols="50"></textarea><br>
+        <label for="kValue">K Value:</label><br>
+        <input type="text" id="kValue" name="kValue"><br>
+        <input type="submit" value="Predict">
+    </form>
+    <div id="result"></div>
+   <script src="{% static 'js/script.js' %}"></script>
+</body>
+</html>
