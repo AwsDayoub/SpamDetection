@@ -1,105 +1,135 @@
-import re
-import json
+import os
 import numpy as np
 import pandas as pd
-from random import randint
-from math import sqrt
-from collections import Counter
-#from sklearn.preprocessing import StandardScaler
+from django.shortcuts import render, redirect
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from django.shortcuts import render
+from sklearn.feature_extraction.text import TfidfVectorizer
+import pickle
 
+from .forms import TrainForm, PredictForm
 
+# Paths to save the trained models and vectorizer
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+VECTOR_PATH = os.path.join(BASE_DIR, 'main/models/vectorizer.pkl')
+KNN_MODEL_PATH = os.path.join(BASE_DIR, 'main/models/knn_model.pkl')
+KMEANS_MODEL_PATH = os.path.join(BASE_DIR, 'main/models/kmeans_model.pkl')
+
+# Custom KNN Classifier
+class KNNClassifier:
+    def __init__(self, k):
+        self.k = k
+
+    def fit(self, X_train, y_train):
+        self.X_train = X_train
+        self.y_train = y_train
+
+    def predict(self, X_test):
+        y_pred = []
+        for x in X_test:
+            distances = [np.sqrt(np.sum((x - x_train)**2)) for x_train in self.X_train]
+            nearest_neighbors = np.argsort(distances)[:self.k]
+            nearest_labels = [self.y_train[i] for i in nearest_neighbors]
+            y_pred.append(max(set(nearest_labels), key=nearest_labels.count))
+        return np.array(y_pred)
+
+# Custom KMeans Clustering
+class KMeansClustering:
+    def __init__(self, n_clusters, max_iter=300):
+        self.n_clusters = n_clusters
+        self.max_iter = max_iter
+
+    def fit(self, X):
+        self.centroids = X[np.random.choice(range(len(X)), self.n_clusters, replace=False)]
+        for _ in range(self.max_iter):
+            clusters = [[] for _ in range(self.n_clusters)]
+            for x in X:
+                distances = [np.linalg.norm(x - c) for c in self.centroids]
+                cluster_index = np.argmin(distances)
+                clusters[cluster_index].append(x)
+            new_centroids = [np.mean(cluster, axis=0) if cluster else np.random.rand(X.shape[1]) for cluster in clusters]
+            if np.allclose(self.centroids, new_centroids):
+                break
+            self.centroids = new_centroids
+
+    def predict(self, X):
+        return [np.argmin([np.linalg.norm(x - c) for c in self.centroids]) for x in X]
+
+@csrf_exempt
 def index(request):
-    return render(request, 'main/predictor.html')
-
-
-# Utility functions
-
-def extract_features(email_text):
-    words = re.findall(r'\b\w+\b', email_text.lower())
-    return Counter(words)
-
-def load_data(file):
-    df = pd.read_csv(file)
-    email_texts = df.iloc[:, 0].tolist()
-    labels = df.iloc[:, 1].apply(lambda x: 1 if x == '1' else 0).tolist()
-    features = [extract_features(email) for email in email_texts]
-    vectorized_data = pd.DataFrame(features).fillna(0).values
-    return email_texts, vectorized_data, labels
-
-def euclidean_distance(point1, point2):
-    distance = 0.0
-    for i in range(len(point2)):
-        distance += (point1[i] - point2[i]) ** 2
-    return sqrt(distance)
-
-def k_means(data, k):
-    centers = [data[randint(0, len(data) - 1)] for _ in range(k)]
-    labels = [-1] * len(data)
-    max_iterations = 700
-
-    for _ in range(max_iterations):
-        new_labels = []
-        for point in data:
-            distances = [euclidean_distance(point, center) for center in centers]
-            new_labels.append(np.argmin(distances))
-
-        if new_labels == labels:
-            break
-        labels = new_labels
-
-        new_centers = np.zeros_like(centers)
-        counts = np.zeros(k)
-        for label, point in zip(labels, data):
-            new_centers[label] += point
-            counts[label] += 1
-        centers = [new_centers[i] / counts[i] if counts[i] > 0 else centers[i] for i in range(k)]
-
-    return labels, centers
-
-def predict_knn(train_data, train_labels, test_point, k):
-    distances = []
-    for i, train_point in enumerate(train_data):
-        distance = euclidean_distance(train_point, test_point)
-        distances.append((distance, train_labels[i]))
-    distances.sort(key=lambda x: x[0])
-    k_nearest_labels = [label for _, label in distances[:k]]
-    return Counter(k_nearest_labels).most_common(1)[0][0]
-
-
-# Django views
+    train_form = TrainForm()
+    predict_form = PredictForm()
+    return render(request, 'main/predictor.html', {'train_form': train_form, 'predict_form': predict_form})
 
 @csrf_exempt
 def train(request):
-    if request.method == 'POST' and request.FILES.get('file'):
-        file = request.FILES['file']
-        email_texts, data, labels = load_data(file)
-        
-        global train_data, train_labels, kmeans_labels, centers
-        train_data, train_labels = data, labels
-        k = 2
-        kmeans_labels, centers = k_means(data, k)
-        print(kmeans_labels, centers)
-        return JsonResponse({'message': 'Training completed successfully.'})
-    return JsonResponse({'error': 'Invalid request.'}, status=400)
+    if request.method == 'POST':
+        train_form = TrainForm(request.POST, request.FILES)
+        if train_form.is_valid():
+            data_file = request.FILES['data_file']
+            try:
+                data = pd.read_csv(data_file)
+                if 'text' not in data.columns or 'spam' not in data.columns:
+                    return JsonResponse({'error': 'CSV file must contain "email_text" and "label" columns.'}, status=400)
+                
+                vectorizer = TfidfVectorizer(stop_words='english')
+                X = vectorizer.fit_transform(data['text']).toarray()
+                y = data['spam'].values
 
+                # Train KNN
+                knn = KNNClassifier(k=5)
+                knn.fit(X, y)
+
+                # Train KMeans
+                kmeans = KMeansClustering(n_clusters=2)
+                kmeans.fit(X)
+
+                # Ensure the models directory exists
+                os.makedirs(os.path.dirname(VECTOR_PATH), exist_ok=True)
+
+                # Save models and vectorizer
+                with open(VECTOR_PATH, 'wb') as f:
+                    pickle.dump(vectorizer, f)
+                with open(KNN_MODEL_PATH, 'wb') as f:
+                    pickle.dump(knn, f)
+                with open(KMEANS_MODEL_PATH, 'wb') as f:
+                    pickle.dump(kmeans, f)
+
+                return JsonResponse({'status': 'Training successful'})
+            except Exception as e:
+                return JsonResponse({'error': str(e)}, status=500)
+    else:
+        train_form = TrainForm()
+    return redirect('index')
 
 @csrf_exempt
 def predict(request):
     if request.method == 'POST':
-        email_text = request.POST.get('email_text', '')
-        k = int(request.POST.get('k', 5))
-        
-        if not email_text:
-            return JsonResponse({'error': 'No email text provided.'}, status=400)
+        predict_form = PredictForm(request.POST)
+        if predict_form.is_valid():
+            email_text = predict_form.cleaned_data['email_text']
+            k_value = predict_form.cleaned_data['k_value']
 
-        test_data = extract_features(email_text)
-        vectorized_data = pd.DataFrame([test_data]).fillna(0).values[0]
-        
-        global train_data, kmeans_labels
-        predicted_label = predict_knn(train_data, kmeans_labels, vectorized_data, k)
-        
-        return JsonResponse({'predicted_label': 'spam' if predicted_label == 1 else 'not spam'})
-    return JsonResponse({'error': 'Invalid request.'}, status=400)
+            # Check if model files exist
+            if not os.path.exists(VECTOR_PATH) or not os.path.exists(KNN_MODEL_PATH) or not os.path.exists(KMEANS_MODEL_PATH):
+                return JsonResponse({'error': 'Model files not found. Please train the model first.'}, status=500)
+
+            with open(VECTOR_PATH, 'rb') as f:
+                vectorizer = pickle.load(f)
+            with open(KNN_MODEL_PATH, 'rb') as f:
+                knn = pickle.load(f)
+            with open(KMEANS_MODEL_PATH, 'rb') as f:
+                kmeans = pickle.load(f)
+
+            X_new = vectorizer.transform([email_text]).toarray()
+
+            knn_pred = knn.predict(X_new)[0]
+            kmeans_pred = kmeans.predict(X_new)[0]
+
+            return JsonResponse({
+                'knn_prediction': 'spam' if knn_pred == 1 else 'not spam',
+                'kmeans_prediction': 'spam' if kmeans_pred == 1 else 'not spam'
+            })
+    else:
+        predict_form = PredictForm()
+    return redirect('index')
