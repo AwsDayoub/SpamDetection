@@ -5,7 +5,7 @@ import pandas as pd
 from random import randint
 from math import sqrt
 from collections import Counter
-from sklearn.preprocessing import StandardScaler
+#from sklearn.preprocessing import StandardScaler
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import render
