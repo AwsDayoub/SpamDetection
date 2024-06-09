@@ -9,6 +9,9 @@ from sklearn.preprocessing import StandardScaler
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import render
+from django.http import HttpResponse
+
+
 def index(request):
     return render(request, 'main/predictor.html')
 
@@ -75,6 +78,8 @@ def predict_knn(train_data, train_labels, test_point, k):
     k_nearest_labels = [label for _, label in distances[:k]]
     return Counter(k_nearest_labels).most_common(1)[0][0]
 
+
+
 # Global variables for training data
 train_data, train_labels, kmeans_labels, centers = [], [], [], []
 
@@ -93,6 +98,8 @@ def train(request):
         print(kmeans_labels, centers)
         return JsonResponse({'message': 'Training completed successfully.'})
     return JsonResponse({'error': 'Invalid request.'}, status=400)
+
+
 @csrf_exempt
 def predict(request):
     if request.method == 'POST':
@@ -100,7 +107,7 @@ def predict(request):
         k = int(request.POST.get('k', 5))
         
         if not email_text:
-            return JsonResponse({'error': 'No email text provided.'}, status=400)
+            return HttpResponse({'error': 'No email text provided.'}, status=400)
 
         test_data = extract_features(email_text)
         vectorized_data = pd.DataFrame([test_data]).fillna(0).values[0]
@@ -108,5 +115,5 @@ def predict(request):
         global train_data, kmeans_labels
         predicted_label = predict_knn(train_data, kmeans_labels, vectorized_data, k)
         
-        return JsonResponse({'predicted_label': 'spam' if predicted_label == 1 else 'not spam'})
-    return JsonResponse({'error': 'Invalid request.'}, status=400)
+        return HttpResponse({'predicted_label': 'spam' if predicted_label == 1 else 'not spam'})
+    return HttpResponse({'error': 'Invalid request.'}, status=400)
