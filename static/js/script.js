@@ -1,4 +1,4 @@
-document.getElementById('predictForm').addEventListener('submit', function(event) {
+/*document.getElementById('predictForm').addEventListener('submit', function(event) {
     event.preventDefault();
     var emailText = document.getElementById('email_text').value;
     var kValue = document.getElementById('kValue').value;
@@ -18,3 +18,4 @@ document.getElementById('predictForm').addEventListener('submit', function(event
         console.error('Error:', error);
     });
 });
+*/
